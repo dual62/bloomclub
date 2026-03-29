@@ -29,7 +29,7 @@ const KEYWORD_MAP: Record<string, string[]> = {
 export function findMatchingProducts(text: string, products: Product[]) {
   const lower = text.toLowerCase()
   const hashtagPattern = /#[\w]+/g
-  const foundTags = lower.match(hashtagPattern) || []
+ const foundTags: string[] = lower.match(hashtagPattern) || []
 
   for (const [kw, tags] of Object.entries(KEYWORD_MAP)) {
     if (lower.includes(kw)) foundTags.push(...tags)
