@@ -105,44 +105,68 @@ export default function AdminPage() {
 function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | null, onUpload: (url: string) => void, folder: string }) {
   const [uploading, setUploading] = useState(false)
   const [preview, setPreview] = useState(currentUrl || '')
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Sync preview with parent
+  useEffect(() => { setPreview(currentUrl || '') }, [currentUrl])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    setError('')
+    setSuccess(false)
 
-    // Preview
+    // Check file size
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Bestand te groot (max 5MB)')
+      return
+    }
+
+    // Show local preview
     const reader = new FileReader()
     reader.onload = (ev) => setPreview(ev.target?.result as string)
     reader.readAsDataURL(file)
 
     setUploading(true)
-    const ext = file.name.split('.').pop()
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
     const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
-    const { data, error } = await supabase.storage
-      .from('product-images')
-      .upload(fileName, file, { cacheControl: '3600', upsert: false })
+    try {
+      const { data, error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(fileName, file, { cacheControl: '3600', upsert: false })
 
-    if (error) {
-      alert('Upload fout: ' + error.message)
+      if (uploadError) {
+        setError('Upload fout: ' + uploadError.message)
+        setUploading(false)
+        return
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('product-images')
+        .getPublicUrl(data.path)
+
+      const publicUrl = urlData.publicUrl
+      console.log('Upload success, URL:', publicUrl)
+      onUpload(publicUrl)
+      setPreview(publicUrl)
+      setSuccess(true)
       setUploading(false)
-      return
+    } catch (err: any) {
+      setError('Upload mislukt: ' + (err.message || 'onbekende fout'))
+      setUploading(false)
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('product-images')
-      .getPublicUrl(data.path)
-
-    onUpload(publicUrl)
-    setUploading(false)
+    // Reset file input
+    if (fileRef.current) fileRef.current.value = ''
   }
 
   return (
     <div>
       <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-2">Afbeelding</label>
       <div className="flex gap-4 items-start">
-        {/* Preview */}
         <div className="w-24 h-24 rounded-xl border-2 border-dashed border-navy/10 overflow-hidden flex items-center justify-center bg-cream flex-shrink-0">
           {preview ? (
             <img src={preview} alt="Preview" className="w-full h-full object-cover" />
@@ -151,16 +175,18 @@ function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | n
           )}
         </div>
         <div className="flex-1">
-          <input ref={fileRef} type="file" accept="image/*" onChange={handleUpload} className="hidden" />
-          <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleUpload} className="hidden" />
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
               uploading ? 'bg-navy/10 text-text-faint cursor-wait' : 'bg-navy/5 text-navy hover:bg-navy/10'
             }`}>
             {uploading ? '⏳ Uploaden...' : '📁 Foto kiezen'}
           </button>
           <p className="text-[10px] text-text-faint mt-1.5">JPG, PNG of WebP · Max 5MB</p>
+          {error && <p className="text-[11px] text-red-500 mt-1 font-medium">⚠ {error}</p>}
+          {success && <p className="text-[11px] text-green-500 mt-1 font-medium">✓ Foto geüpload! Klik op Opslaan.</p>}
           {preview && (
-            <button onClick={() => { setPreview(''); onUpload('') }}
+            <button type="button" onClick={() => { setPreview(''); onUpload(''); setSuccess(false) }}
               className="text-[11px] text-red-400 mt-1 hover:text-red-600">✕ Verwijderen</button>
           )}
         </div>
@@ -179,13 +205,17 @@ function BrandsTab({ brands, onRefresh, notify }: { brands: Brand[], onRefresh: 
 
   const saveBrand = async (brand: any, isNew: boolean) => {
     if (!brand.name || !brand.slug) { alert('Naam en slug zijn verplicht'); return }
+    
+    const { id, created_at, updated_at, is_active, ...cleanData } = brand
+    console.log('Saving brand:', isNew ? 'INSERT' : 'UPDATE', cleanData)
+    
     if (isNew) {
-      const { error } = await supabase.from('brands').insert(brand)
-      if (error) { alert('Fout: ' + error.message); return }
+      const { error } = await supabase.from('brands').insert(cleanData)
+      if (error) { alert('Fout: ' + error.message); console.error(error); return }
       notify('Merk toegevoegd!')
     } else {
-      const { error } = await supabase.from('brands').update(brand).eq('id', brand.id)
-      if (error) { alert('Fout: ' + error.message); return }
+      const { error } = await supabase.from('brands').update(cleanData).eq('id', id)
+      if (error) { alert('Fout: ' + error.message); console.error(error); return }
       notify('Merk bijgewerkt!')
     }
     setEditing(null); setAdding(false); onRefresh()
@@ -272,7 +302,7 @@ function BrandForm({ brand, isNew, onSave, onCancel }: { brand: any, isNew: bool
         </div>
         <div className="flex gap-3 pt-4 border-t border-navy/5">
           <button onClick={onCancel} className="px-6 py-3 rounded-xl border border-navy/10 text-text-soft font-semibold text-sm">Annuleren</button>
-          <button onClick={() => { const { id, created_at, updated_at, is_active, ...rest } = form; onSave(isNew ? rest : form, isNew) }}
+          <button onClick={() => { onSave(form, isNew) }}
             className="px-6 py-3 rounded-xl bg-gradient-to-br from-coral to-coral-soft text-white font-bold text-sm shadow-md shadow-coral/20">
             {isNew ? 'Toevoegen' : 'Opslaan'}
           </button>
@@ -292,14 +322,24 @@ function ProductsTab({ products, brands, onRefresh, notify }: { products: any[],
 
   const saveProduct = async (product: any, isNew: boolean) => {
     if (!product.name || !product.slug || !product.brand_id) { alert('Naam, slug en merk zijn verplicht'); return }
-    const data = { ...product, price: parseFloat(product.price) || 0, stock: parseInt(product.stock) || 0 }
+    
+    // Clean data - remove joined/computed fields that Supabase can't save
+    const { id, created_at, updated_at, is_active, brand, sort_order, score, ...cleanData } = product
+    const data = { 
+      ...cleanData, 
+      price: parseFloat(cleanData.price) || 0, 
+      stock: parseInt(cleanData.stock) || 0 
+    }
+    
+    console.log('Saving product:', isNew ? 'INSERT' : 'UPDATE', data)
+    
     if (isNew) {
       const { error } = await supabase.from('products').insert(data)
-      if (error) { alert('Fout: ' + error.message); return }
+      if (error) { alert('Fout: ' + error.message); console.error(error); return }
       notify('Product toegevoegd!')
     } else {
-      const { error } = await supabase.from('products').update(data).eq('id', product.id)
-      if (error) { alert('Fout: ' + error.message); return }
+      const { error } = await supabase.from('products').update(data).eq('id', id)
+      if (error) { alert('Fout: ' + error.message); console.error(error); return }
       notify('Product bijgewerkt!')
     }
     setEditing(null); setAdding(false); onRefresh()
@@ -410,7 +450,7 @@ function ProductForm({ product, brands, isNew, onSave, onCancel }: { product: an
         </div>
         <div className="flex gap-3 pt-4 border-t border-navy/5">
           <button onClick={onCancel} className="px-6 py-3 rounded-xl border border-navy/10 text-text-soft font-semibold text-sm">Annuleren</button>
-          <button onClick={() => { const { id, created_at, updated_at, is_active, brand, sort_order, ...rest } = form; onSave(isNew ? rest : form, isNew) }}
+          <button onClick={() => { onSave(form, isNew) }}
             className="px-6 py-3 rounded-xl bg-gradient-to-br from-coral to-coral-soft text-white font-bold text-sm shadow-md shadow-coral/20">
             {isNew ? 'Toevoegen' : 'Opslaan'}
           </button>
