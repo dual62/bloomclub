@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'E-mailadres ontbreekt' }, { status: 400 })
   }
 
-  const toEmail = order.address.email
+  const toEmail = order.address.email.toLowerCase().trim()
   console.log('Sending confirmation to:', toEmail)
 
   // Build simple HTML email
