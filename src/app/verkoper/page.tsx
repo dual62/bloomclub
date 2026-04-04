@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 
@@ -247,34 +247,7 @@ export default function VerkoperDashboard() {
 
           {/* ═══ PRODUCTEN ═══ */}
           {tab === 'producten' && (
-            <div className="animate-fade-up">
-              <h2 className="font-display text-2xl text-navy mb-5">Mijn producten ({products.length})</h2>
-              <div className="flex flex-col gap-3">
-                {products.map(p => (
-                  <div key={p.id} className="bg-white rounded-2xl p-5 flex items-center gap-4 border border-navy/[0.03] flex-wrap">
-                    <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 bg-cream">
-                      {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /> : <span className="text-2xl">{p.icon}</span>}
-                    </div>
-                    <div className="flex-1 min-w-[180px]">
-                      <div className="font-semibold text-navy">{p.name}</div>
-                      <div className="text-xs text-text-faint">€{parseFloat(p.price).toFixed(2).replace('.', ',')} · {(p.tags || []).join(' ')}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-text-faint">Voorraad:</span>
-                      <button onClick={() => updateStock(p.id, p.stock - 1)}
-                        className="w-8 h-8 rounded-lg border border-navy/10 bg-cream text-sm font-bold flex items-center justify-center hover:bg-warm-dark transition-colors">−</button>
-                      <span className={`font-bold text-base min-w-[30px] text-center ${p.stock <= 5 ? 'text-red-500' : 'text-navy'}`}>{p.stock}</span>
-                      <button onClick={() => updateStock(p.id, p.stock + 1)}
-                        className="w-8 h-8 rounded-lg border border-navy/10 bg-cream text-sm font-bold flex items-center justify-center hover:bg-warm-dark transition-colors">+</button>
-                    </div>
-                    {p.badge && <span className="text-[10px] font-bold text-coral bg-coral/8 px-2.5 py-1 rounded-md">{p.badge}</span>}
-                    <span className={`text-xs font-bold px-3 py-1 rounded-lg ${p.stock <= 5 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}>
-                      {p.stock <= 0 ? 'Uitverkocht' : p.stock <= 5 ? 'Bijna op' : 'Op voorraad'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <VerkoperProductenTab products={products} brandId={profile.brand_id!} onRefresh={() => loadData(profile.brand_id!)} notify={notify} updateStock={updateStock} />
           )}
 
           {/* ═══ BESTELLINGEN ═══ */}
@@ -404,6 +377,260 @@ function OrderRow({ order, expanded }: { order: any, expanded?: boolean }) {
           {order.shipping_city && <span>📍 {order.shipping_city}</span>}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Verkoper Producten Tab ───
+function VerkoperProductenTab({ products, brandId, onRefresh, notify, updateStock }: {
+  products: any[], brandId: string, onRefresh: () => void, notify: (s: string) => void, updateStock: (id: string, stock: number) => void
+}) {
+  const [editing, setEditing] = useState<any>(null)
+  const [adding, setAdding] = useState(false)
+
+  const emptyProduct = { name: '', slug: '', description: '', long_description: '', price: 0, icon: '🌸', badge: '', tags: [] as string[], stock: 0, brand_id: brandId, image_url: '' }
+
+  const saveProduct = async (product: any, isNew: boolean) => {
+    if (!product.name || !product.slug) { alert('Naam en slug zijn verplicht'); return }
+    const { id, created_at, updated_at, is_active, brand, sort_order, score, ...cleanData } = product
+    const data = { ...cleanData, brand_id: brandId, price: parseFloat(cleanData.price) || 0, stock: parseInt(cleanData.stock) || 0 }
+
+    if (isNew) {
+      const { error } = await supabase.from('products').insert(data)
+      if (error) { alert('Fout: ' + error.message); return }
+      notify('Product toegevoegd!')
+    } else {
+      const { error } = await supabase.from('products').update(data).eq('id', id)
+      if (error) { alert('Fout: ' + error.message); return }
+      notify('Product bijgewerkt!')
+    }
+    setEditing(null); setAdding(false); onRefresh()
+  }
+
+  const deleteProduct = async (id: string) => {
+    if (!confirm('Product verwijderen?')) return
+    await supabase.from('products').delete().eq('id', id)
+    notify('Product verwijderd'); onRefresh()
+  }
+
+  if (editing || adding) {
+    return <VerkoperProductForm product={editing || emptyProduct} isNew={adding} onSave={saveProduct} onCancel={() => { setEditing(null); setAdding(false) }} />
+  }
+
+  return (
+    <div className="animate-fade-up">
+      <div className="flex justify-between items-center mb-5 flex-wrap gap-3">
+        <h2 className="font-display text-2xl text-navy">Mijn producten ({products.length})</h2>
+        <button onClick={() => setAdding(true)}
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-br from-coral to-coral-soft text-white text-sm font-bold shadow-md shadow-coral/20">
+          + Nieuw product
+        </button>
+      </div>
+      <div className="flex flex-col gap-3">
+        {products.map(p => (
+          <div key={p.id} className="bg-white rounded-2xl p-5 flex items-center gap-4 border border-navy/[0.03] flex-wrap">
+            <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0 bg-cream">
+              {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /> : <span className="text-2xl">{p.icon}</span>}
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <div className="font-semibold text-navy">{p.name}</div>
+              <div className="text-xs text-text-faint">€{parseFloat(p.price).toFixed(2).replace('.', ',')} · {(p.tags || []).join(' ')}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-text-faint">Voorraad:</span>
+              <button onClick={() => updateStock(p.id, p.stock - 1)}
+                className="w-8 h-8 rounded-lg border border-navy/10 bg-cream text-sm font-bold flex items-center justify-center hover:bg-warm-dark transition-colors">−</button>
+              <span className={`font-bold text-base min-w-[30px] text-center ${p.stock <= 5 ? 'text-red-500' : 'text-navy'}`}>{p.stock}</span>
+              <button onClick={() => updateStock(p.id, p.stock + 1)}
+                className="w-8 h-8 rounded-lg border border-navy/10 bg-cream text-sm font-bold flex items-center justify-center hover:bg-warm-dark transition-colors">+</button>
+            </div>
+            {p.badge && <span className="text-[10px] font-bold text-coral bg-coral/8 px-2.5 py-1 rounded-md">{p.badge}</span>}
+            <span className={`text-xs font-bold px-3 py-1 rounded-lg ${p.stock <= 5 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}>
+              {p.stock <= 0 ? 'Uitverkocht' : p.stock <= 5 ? 'Bijna op' : 'Op voorraad'}
+            </span>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(p)} className="px-3 py-1.5 rounded-lg bg-navy/5 text-navy text-xs font-semibold">✏ Bewerk</button>
+              <button onClick={() => deleteProduct(p.id)} className="px-3 py-1.5 rounded-lg bg-red-50 text-red-500 text-xs font-semibold">🗑</button>
+            </div>
+          </div>
+        ))}
+        {products.length === 0 && (
+          <div className="text-center py-12 text-text-faint">
+            <div className="text-4xl mb-3">📦</div>
+            <p>Nog geen producten. Klik op "+ Nieuw product" om te beginnen.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Verkoper Product Form ───
+async function resizeImage(file: File, maxSize = 800, quality = 0.8): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxSize || height > maxSize) {
+        if (width > height) { height = Math.round(height * maxSize / width); width = maxSize }
+        else { width = Math.round(width * maxSize / height); height = maxSize }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas not supported')); return }
+      ctx.drawImage(img, 0, 0, width, height)
+      canvas.toBlob(blob => { blob ? resolve(blob) : reject(new Error('Compression failed')) }, 'image/jpeg', quality)
+    }
+    img.onerror = () => reject(new Error('Afbeelding kon niet geladen worden'))
+    img.src = URL.createObjectURL(file)
+  })
+}
+
+function VerkoperProductForm({ product, isNew, onSave, onCancel }: { product: any, isNew: boolean, onSave: (p: any, isNew: boolean) => void, onCancel: () => void }) {
+  const [form, setForm] = useState({ ...product, tags: product.tags || [] })
+  const [tagInput, setTagInput] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [preview, setPreview] = useState(product.image_url || '')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const upd = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }))
+  const addTag = () => {
+    if (!tagInput.trim()) return
+    upd('tags', [...form.tags, tagInput.startsWith('#') ? tagInput.trim() : `#${tagInput.trim()}`])
+    setTagInput('')
+  }
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    const reader = new FileReader()
+    reader.onload = (ev) => setPreview(ev.target?.result as string)
+    reader.readAsDataURL(file)
+
+    try {
+      const resized = await resizeImage(file, 800, 0.8)
+      const fileName = `products/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`
+      const { data, error } = await supabase.storage.from('product-images').upload(fileName, resized, { cacheControl: '3600', upsert: false, contentType: 'image/jpeg' })
+      if (error) { alert('Upload fout: ' + error.message); setUploading(false); return }
+      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(data.path)
+      upd('image_url', urlData.publicUrl)
+      setPreview(urlData.publicUrl)
+    } catch (err: any) { alert('Upload mislukt: ' + err.message) }
+    setUploading(false)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const icons = ['🧴', '💊', '🖌️', '✨', '🫖', '🌸', '💫', '🌿', '🌙', '☀️', '💎', '💨', '👁️', '🐟']
+
+  return (
+    <div className="animate-fade-up max-w-2xl">
+      <button onClick={onCancel} className="text-sm text-text-soft hover:text-coral mb-4 block">← Terug naar producten</button>
+      <h2 className="font-display text-2xl text-navy mb-6">{isNew ? 'Nieuw product toevoegen' : `${form.name} bewerken`}</h2>
+
+      <div className="bg-white rounded-2xl p-7 border border-navy/[0.03] flex flex-col gap-5">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Productnaam *</label>
+            <input value={form.name} onChange={e => { upd('name', e.target.value); if (isNew) upd('slug', e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-')) }}
+              className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Slug *</label>
+            <input value={form.slug} onChange={e => upd('slug', e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Korte beschrijving</label>
+          <textarea value={form.description || ''} onChange={e => upd('description', e.target.value)} rows={2}
+            className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream resize-y" />
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Uitgebreide beschrijving</label>
+          <textarea value={form.long_description || ''} onChange={e => upd('long_description', e.target.value)} rows={3}
+            className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream resize-y" />
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Prijs (€) *</label>
+            <input value={form.price} onChange={e => upd('price', e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Voorraad</label>
+            <input value={form.stock} onChange={e => upd('stock', e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Badge</label>
+            <input value={form.badge || ''} onChange={e => upd('badge', e.target.value)} placeholder="bijv. Bestseller"
+              className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+          </div>
+        </div>
+
+        {/* Foto upload */}
+        <div>
+          <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-2">Productfoto</label>
+          <div className="flex gap-4 items-start">
+            <div className="w-24 h-24 rounded-xl border-2 border-dashed border-navy/10 overflow-hidden flex items-center justify-center bg-cream flex-shrink-0">
+              {preview ? <img src={preview} alt="Preview" className="w-full h-full object-cover" /> : <span className="text-2xl text-text-faint">📷</span>}
+            </div>
+            <div>
+              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleUpload} className="hidden" />
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold ${uploading ? 'bg-navy/10 text-text-faint' : 'bg-navy/5 text-navy hover:bg-navy/10'}`}>
+                {uploading ? '⏳ Uploaden...' : '📁 Foto kiezen'}
+              </button>
+              <p className="text-[10px] text-text-faint mt-1.5">Max 800×800px · Automatisch verkleind</p>
+              {preview && <button type="button" onClick={() => { setPreview(''); upd('image_url', '') }} className="text-[11px] text-red-400 mt-1">✕ Verwijderen</button>}
+            </div>
+          </div>
+        </div>
+
+        {/* Icoon */}
+        <div>
+          <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-2">Icoon (fallback zonder foto)</label>
+          <div className="flex gap-2 flex-wrap">
+            {icons.map(ic => (
+              <div key={ic} onClick={() => upd('icon', ic)}
+                className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl cursor-pointer ${form.icon === ic ? 'bg-coral/10 ring-2 ring-coral' : 'bg-navy/[0.03]'}`}>{ic}</div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tags */}
+        <div>
+          <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-2">Hashtags ({form.tags.length})</label>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {form.tags.map((tag: string, i: number) => (
+              <span key={i} className="text-xs font-semibold text-coral bg-coral/8 px-3 py-1 rounded-lg flex items-center gap-1.5">
+                {tag}
+                <span onClick={() => upd('tags', form.tags.filter((_: any, j: number) => j !== i))} className="cursor-pointer opacity-50 hover:opacity-100">×</span>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input value={tagInput} onChange={e => setTagInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
+              placeholder="#nieuwetag" className="flex-1 px-4 py-2 rounded-xl border border-navy/10 text-sm bg-cream" />
+            <button onClick={addTag} className="px-4 py-2 rounded-xl bg-navy text-white text-sm font-bold">+</button>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3 pt-4 border-t border-navy/5">
+          <button onClick={onCancel} className="px-6 py-3 rounded-xl border border-navy/10 text-text-soft font-semibold text-sm">Annuleren</button>
+          <button onClick={() => onSave(form, isNew)}
+            className="px-6 py-3 rounded-xl bg-gradient-to-br from-coral to-coral-soft text-white font-bold text-sm shadow-md shadow-coral/20">
+            {isNew ? 'Product toevoegen' : 'Opslaan'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
