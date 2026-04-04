@@ -19,7 +19,7 @@ export default function VerkoperDashboard() {
   const [orders, setOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [authLoading, setAuthLoading] = useState(true)
-  const [tab, setTab] = useState<'overzicht' | 'producten' | 'bestellingen' | 'omzet'>('overzicht')
+  const [tab, setTab] = useState<'overzicht' | 'producten' | 'bestellingen' | 'omzet' | 'profiel'>('overzicht')
   const [toast, setToast] = useState('')
 
   const notify = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
@@ -164,6 +164,7 @@ export default function VerkoperDashboard() {
     { id: 'producten' as const, label: 'Producten', icon: '📦' },
     { id: 'bestellingen' as const, label: 'Bestellingen', icon: '🧾' },
     { id: 'omzet' as const, label: 'Omzet', icon: '💰' },
+    { id: 'profiel' as const, label: 'Profiel', icon: '👤' },
   ]
 
   return (
@@ -328,6 +329,11 @@ export default function VerkoperDashboard() {
               </div>
             </div>
           )}
+
+          {/* ═══ PROFIEL ═══ */}
+          {tab === 'profiel' && (
+            <ProfielTab profile={profile} onUpdate={(p) => setProfile(p)} notify={notify} />
+          )}
         </>
       )}
     </div>
@@ -398,6 +404,129 @@ function OrderRow({ order, expanded }: { order: any, expanded?: boolean }) {
           {order.shipping_city && <span>📍 {order.shipping_city}</span>}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Profiel Tab ───
+function ProfielTab({ profile, onUpdate, notify }: { profile: any, onUpdate: (p: any) => void, notify: (s: string) => void }) {
+  const [name, setName] = useState(profile.name || '')
+  const [saving, setSaving] = useState(false)
+  const [showPw, setShowPw] = useState(false)
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
+
+  const saveName = async () => {
+    if (!name.trim()) return
+    setSaving(true)
+    const { error } = await supabase.from('profiles').update({ name: name.trim() }).eq('id', profile.id)
+    if (error) { alert('Fout: ' + error.message); setSaving(false); return }
+    onUpdate({ ...profile, name: name.trim() })
+    notify('Naam bijgewerkt!')
+    setSaving(false)
+  }
+
+  const changePassword = async () => {
+    if (!newPw || newPw.length < 6) { alert('Wachtwoord moet minimaal 6 tekens zijn'); return }
+    if (newPw !== confirmPw) { alert('Wachtwoorden komen niet overeen'); return }
+    setPwSaving(true)
+    const { error } = await supabase.auth.updateUser({ password: newPw })
+    if (error) { alert('Fout: ' + error.message); setPwSaving(false); return }
+    notify('Wachtwoord gewijzigd!')
+    setNewPw('')
+    setConfirmPw('')
+    setShowPw(false)
+    setPwSaving(false)
+  }
+
+  return (
+    <div className="animate-fade-up max-w-lg">
+      <h2 className="font-display text-2xl text-navy mb-6">Mijn profiel</h2>
+
+      <div className="bg-white rounded-2xl p-7 border border-navy/[0.03] mb-6">
+        <div className="flex items-center gap-4 mb-6 pb-6 border-b border-navy/5">
+          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-gold/20 to-gold/10 flex items-center justify-center text-2xl font-bold text-gold">
+            {(profile.name || 'V').charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="font-bold text-lg text-navy">{profile.name}</div>
+            <div className="text-sm text-text-faint">{profile.email} · {profile.company || 'Verkoper'}</div>
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Naam</label>
+          <input value={name} onChange={e => setName(e.target.value)}
+            className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+        </div>
+        <button onClick={saveName} disabled={saving || name === profile.name}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${
+            saving || name === profile.name
+              ? 'bg-navy/5 text-text-faint cursor-not-allowed'
+              : 'bg-gradient-to-br from-navy to-navy-light text-white shadow-md shadow-navy/20'
+          }`}>
+          {saving ? 'Opslaan...' : 'Naam opslaan'}
+        </button>
+
+        <div className="mt-6 pt-6 border-t border-navy/5">
+          <div className="flex justify-between py-2.5 border-b border-navy/[0.03]">
+            <span className="text-sm text-text-faint">E-mail</span>
+            <span className="text-sm font-semibold text-navy">{profile.email}</span>
+          </div>
+          <div className="flex justify-between py-2.5 border-b border-navy/[0.03]">
+            <span className="text-sm text-text-faint">Rol</span>
+            <span className="text-sm font-semibold text-navy">Verkoper</span>
+          </div>
+          <div className="flex justify-between py-2.5">
+            <span className="text-sm text-text-faint">Bedrijf</span>
+            <span className="text-sm font-semibold text-navy">{profile.company || '—'}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-7 border border-navy/[0.03]">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-display text-xl text-navy">Wachtwoord wijzigen</h3>
+          {!showPw && (
+            <button onClick={() => setShowPw(true)}
+              className="px-4 py-2 rounded-xl bg-coral/5 text-coral text-sm font-semibold hover:bg-coral/10 transition-colors">
+              🔒 Wijzigen
+            </button>
+          )}
+        </div>
+
+        {showPw && (
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Nieuw wachtwoord</label>
+              <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="Min. 6 tekens"
+                className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-text-soft uppercase tracking-[1px] mb-1.5">Bevestig wachtwoord</label>
+              <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} placeholder="Herhaal wachtwoord"
+                className="w-full px-4 py-2.5 rounded-xl border border-navy/10 text-sm bg-cream" />
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button onClick={changePassword} disabled={pwSaving}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                  pwSaving ? 'bg-coral/50 text-white cursor-wait' : 'bg-gradient-to-br from-coral to-coral-soft text-white shadow-md shadow-coral/20'
+                }`}>
+                {pwSaving ? 'Wijzigen...' : 'Wachtwoord wijzigen'}
+              </button>
+              <button onClick={() => { setShowPw(false); setNewPw(''); setConfirmPw('') }}
+                className="px-6 py-2.5 rounded-xl border border-navy/10 text-text-soft text-sm font-semibold">
+                Annuleren
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!showPw && (
+          <p className="text-sm text-text-faint">Klik op "Wijzigen" om je wachtwoord aan te passen.</p>
+        )}
+      </div>
     </div>
   )
 }
