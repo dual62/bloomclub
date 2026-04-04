@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        from: 'onbofrom: 'BloomClub <noreply@bloomclub.be>',arding@resend.dev',
+        from: 'BloomClub <noreply@bloomclub.be>',
         to: toEmail,
         subject: `Orderbevestiging ${order.orderNumber || ''} - BloomClub`,
         html: html,
