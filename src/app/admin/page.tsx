@@ -100,16 +100,48 @@ export default function AdminPage() {
 }
 
 // ═══════════════════════════════════════════
-// IMAGE UPLOAD COMPONENT
+// IMAGE RESIZE + UPLOAD COMPONENT
 // ═══════════════════════════════════════════
+async function resizeImage(file: File, maxSize = 800, quality = 0.8): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      // Scale down if larger than maxSize
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = Math.round(height * maxSize / width)
+          width = maxSize
+        } else {
+          width = Math.round(width * maxSize / height)
+          height = maxSize
+        }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas not supported')); return }
+      ctx.drawImage(img, 0, 0, width, height)
+      canvas.toBlob(
+        (blob) => { blob ? resolve(blob) : reject(new Error('Compression failed')) },
+        'image/jpeg',
+        quality
+      )
+    }
+    img.onerror = () => reject(new Error('Afbeelding kon niet geladen worden'))
+    img.src = URL.createObjectURL(file)
+  })
+}
+
 function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | null, onUpload: (url: string) => void, folder: string }) {
   const [uploading, setUploading] = useState(false)
   const [preview, setPreview] = useState(currentUrl || '')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [sizeInfo, setSizeInfo] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Sync preview with parent
   useEffect(() => { setPreview(currentUrl || '') }, [currentUrl])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -117,10 +149,10 @@ function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | n
     if (!file) return
     setError('')
     setSuccess(false)
+    setSizeInfo('')
 
-    // Check file size
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Bestand te groot (max 5MB)')
+    if (file.size > 10 * 1024 * 1024) {
+      setError('Bestand te groot (max 10MB)')
       return
     }
 
@@ -130,13 +162,23 @@ function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | n
     reader.readAsDataURL(file)
 
     setUploading(true)
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-    const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
     try {
+      // Resize image to max 800x800 and compress as JPEG
+      const originalSize = (file.size / 1024).toFixed(0)
+      const resized = await resizeImage(file, 800, 0.8)
+      const newSize = (resized.size / 1024).toFixed(0)
+      setSizeInfo(`${originalSize}KB → ${newSize}KB`)
+
+      const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`
+
       const { data, error: uploadError } = await supabase.storage
         .from('product-images')
-        .upload(fileName, file, { cacheControl: '3600', upsert: false })
+        .upload(fileName, resized, { 
+          cacheControl: '3600', 
+          upsert: false,
+          contentType: 'image/jpeg'
+        })
 
       if (uploadError) {
         setError('Upload fout: ' + uploadError.message)
@@ -149,7 +191,6 @@ function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | n
         .getPublicUrl(data.path)
 
       const publicUrl = urlData.publicUrl
-      console.log('Upload success, URL:', publicUrl)
       onUpload(publicUrl)
       setPreview(publicUrl)
       setSuccess(true)
@@ -159,7 +200,6 @@ function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | n
       setUploading(false)
     }
 
-    // Reset file input
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -180,13 +220,13 @@ function ImageUpload({ currentUrl, onUpload, folder }: { currentUrl?: string | n
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
               uploading ? 'bg-navy/10 text-text-faint cursor-wait' : 'bg-navy/5 text-navy hover:bg-navy/10'
             }`}>
-            {uploading ? '⏳ Uploaden...' : '📁 Foto kiezen'}
+            {uploading ? '⏳ Verkleinen & uploaden...' : '📁 Foto kiezen'}
           </button>
-          <p className="text-[10px] text-text-faint mt-1.5">JPG, PNG of WebP · Max 5MB</p>
+          <p className="text-[10px] text-text-faint mt-1.5">Wordt automatisch verkleind naar max 800×800px</p>
           {error && <p className="text-[11px] text-red-500 mt-1 font-medium">⚠ {error}</p>}
-          {success && <p className="text-[11px] text-green-500 mt-1 font-medium">✓ Foto geüpload! Klik op Opslaan.</p>}
+          {success && <p className="text-[11px] text-green-500 mt-1 font-medium">✓ Geüpload! {sizeInfo && `(${sizeInfo})`} Klik op Opslaan.</p>}
           {preview && (
-            <button type="button" onClick={() => { setPreview(''); onUpload(''); setSuccess(false) }}
+            <button type="button" onClick={() => { setPreview(''); onUpload(''); setSuccess(false); setSizeInfo('') }}
               className="text-[11px] text-red-400 mt-1 hover:text-red-600">✕ Verwijderen</button>
           )}
         </div>
