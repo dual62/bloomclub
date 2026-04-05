@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/cart'
+import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 
 export default function CheckoutPage() {
@@ -22,18 +23,78 @@ export default function CheckoutPage() {
     setProcessing(true)
 
     const orderNumber = `BC-2026-${String(Math.floor(Math.random() * 9000) + 1000)}`
+    const shippingMethod = shipping === 'express' ? 'Express (1-2 werkdagen)' : 'Standaard (3-5 werkdagen)'
+    const paymentMethod = payment === 'ideal' ? 'iDEAL' : payment === 'bancontact' ? 'Bancontact' : 'Creditcard'
+
+    // 1. Save order to Supabase
+    try {
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          order_number: orderNumber,
+          status: 'pending',
+          total: total,
+          subtotal: cartTotal,
+          shipping_cost: shippingCost,
+          shipping_method: shippingMethod,
+          payment_method: paymentMethod,
+          shipping_name: form.name,
+          shipping_email: form.email.toLowerCase().trim(),
+          shipping_street: form.street,
+          shipping_city: form.city,
+          shipping_zip: form.zip,
+          shipping_phone: form.phone,
+        })
+        .select()
+        .single()
+
+      if (orderError) {
+        console.error('Order save error:', orderError)
+      }
+
+      // 2. Save order items
+      if (order) {
+        const items = cart.map(item => ({
+          order_id: order.id,
+          product_id: item.id,
+          product_name: item.name,
+          brand_name: item.brand?.name || '',
+          price: item.price,
+          quantity: item.qty,
+        }))
+
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(items)
+
+        if (itemsError) {
+          console.error('Order items save error:', itemsError)
+        }
+
+        // 3. Update stock
+        for (const item of cart) {
+          await supabase
+            .from('products')
+            .update({ stock: Math.max(0, (item.stock || 0) - item.qty) })
+            .eq('id', item.id)
+        }
+      }
+    } catch (e) {
+      console.error('Order save failed:', e)
+    }
+
+    // 4. Send confirmation email
     const orderData = {
       orderNumber,
       items: cart.map(item => ({ name: item.name, brand: item.brand?.name, price: item.price, qty: item.qty })),
       subtotal: cartTotal,
       shippingCost,
       total,
-      shippingMethod: shipping === 'express' ? 'Express (1-2 werkdagen)' : 'Standaard (3-5 werkdagen)',
-      paymentMethod: payment === 'ideal' ? 'iDEAL' : payment === 'bancontact' ? 'Bancontact' : 'Creditcard',
+      shippingMethod,
+      paymentMethod,
       address: form,
     }
 
-    // Send confirmation email
     try {
       await fetch('/api/send-confirmation', {
         method: 'POST',
@@ -44,7 +105,6 @@ export default function CheckoutPage() {
       console.error('Email sending failed:', e)
     }
 
-    // In production: also save order to Supabase and call Mollie
     clearCart()
     setProcessing(false)
     router.push('/confirmation')
@@ -149,7 +209,6 @@ export default function CheckoutPage() {
           </div>
           <p className="text-center text-[11px] text-text-faint mt-3">🔒 Beveiligde betaling via Mollie · SSL versleuteld</p>
 
-          {/* Email notice */}
           <div className="mt-4 p-3 bg-green-50 border border-green-100 rounded-xl text-center">
             <p className="text-xs text-green-700 font-medium">📧 Een bevestigingsmail wordt verstuurd naar <strong>{form.email}</strong></p>
           </div>
